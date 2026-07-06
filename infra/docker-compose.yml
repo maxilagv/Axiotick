@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # TimescaleDB: High-performance time-series database
+  timescaledb:
+    image: timescale/timescaledb:latest-pg14
+    container_name: argentum_db
+    environment:
+      - POSTGRES_PASSWORD=argentum_secure_pass
+      - POSTGRES_USER=admin
+      - POSTGRES_DB=argentum_hft
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./timescale_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: always
+    cpus: 2.0
+    mem_limit: 4g
+
+  # Redis: Hot cache for order book snapshots and session states
+  redis:
+    image: redis:alpine
+    container_name: argentum_cache
+    ports:
+      - "6379:6379"
+    restart: always
+
+  # Zookeeper (Required for Kafka)
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: argentum_zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "22181:2181"
+
+  # Kafka (Message Bus Persistence - Optional layer, ZeroMQ is primary for speed)
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    container_name: argentum_kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1

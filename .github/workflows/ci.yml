@@ -1,0 +1,47 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+  lint-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+      - name: Check clang-format
+        run: |
+          python - <<'PY'
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          exts = {".c", ".h", ".cpp", ".hpp"}
+          failed = []
+          for path in Path(".").rglob("*"):
+              if ".git" in path.parts or any(part == "build" or part.startswith("build-") for part in path.parts):
+                  continue
+              if path.suffix in exts:
+                  formatted = subprocess.check_output(["clang-format", str(path)])
+                  if formatted != path.read_bytes():
+                      failed.append(str(path))
+
+          if failed:
+              print("clang-format mismatch:")
+              for f in failed:
+                  print(f)
+              sys.exit(1)
+          PY

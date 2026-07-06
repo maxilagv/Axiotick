@@ -1,0 +1,251 @@
+
+add_executable(message_codec_test message_codec_test.cpp)
+target_link_libraries(message_codec_test PRIVATE argentum_codec argentum_bus argentum_core)
+
+add_test(NAME message_codec_test COMMAND message_codec_test)
+
+add_executable(message_bus_test message_bus_test.cpp)
+target_link_libraries(message_bus_test PRIVATE argentum_bus argentum_core)
+
+add_test(NAME message_bus_test COMMAND message_bus_test)
+
+add_executable(order_validator_test order_validator_test.cpp)
+target_link_libraries(order_validator_test PRIVATE argentum_core)
+
+add_test(NAME order_validator_test COMMAND order_validator_test)
+
+add_executable(fixed_point_overflow_test fixed_point_overflow_test.cpp)
+target_link_libraries(fixed_point_overflow_test PRIVATE argentum_core)
+
+add_test(NAME fixed_point_overflow_test COMMAND fixed_point_overflow_test)
+
+add_executable(order_flow_test order_flow_test.cpp)
+target_link_libraries(order_flow_test PRIVATE argentum_trading argentum_risk argentum_engine argentum_core)
+
+add_test(NAME order_flow_test COMMAND order_flow_test)
+
+add_executable(order_tif_test order_tif_test.cpp)
+target_link_libraries(order_tif_test PRIVATE argentum_trading argentum_risk argentum_engine argentum_core)
+
+add_test(NAME order_tif_test COMMAND order_tif_test)
+
+add_executable(order_concurrency_test order_concurrency_test.cpp)
+target_link_libraries(order_concurrency_test PRIVATE argentum_trading argentum_risk argentum_engine argentum_core)
+
+add_test(NAME order_concurrency_test COMMAND order_concurrency_test)
+
+add_executable(risk_reservation_test risk_reservation_test.cpp)
+target_link_libraries(risk_reservation_test PRIVATE argentum_risk argentum_core)
+
+add_test(NAME risk_reservation_test COMMAND risk_reservation_test)
+
+add_executable(data_writer_test data_writer_test.cpp)
+target_link_libraries(data_writer_test PRIVATE argentum_persist argentum_core)
+
+add_test(NAME data_writer_test COMMAND data_writer_test)
+
+add_executable(api_gateway_contract_test api_gateway_contract_test.cpp)
+target_link_libraries(api_gateway_contract_test PRIVATE argentum_api argentum_bus argentum_codec argentum_trading argentum_core)
+
+add_test(NAME api_gateway_contract_test COMMAND api_gateway_contract_test)
+
+add_executable(api_order_guard_test api_order_guard_test.cpp)
+target_link_libraries(api_order_guard_test PRIVATE argentum_api argentum_trading argentum_risk argentum_engine argentum_bus argentum_core)
+
+add_test(NAME api_order_guard_test COMMAND api_order_guard_test)
+
+add_executable(api_network_e2e_test api_network_e2e_test.cpp)
+target_link_libraries(api_network_e2e_test PRIVATE
+  argentum_api
+  argentum_trading
+  argentum_risk
+  argentum_engine
+  argentum_bus
+  argentum_codec
+  argentum_core
+)
+if(WIN32)
+  target_link_libraries(api_network_e2e_test PRIVATE ws2_32)
+endif()
+
+add_test(NAME api_network_e2e_test COMMAND api_network_e2e_test)
+
+add_executable(event_journal_replay_test event_journal_replay_test.cpp)
+target_link_libraries(event_journal_replay_test PRIVATE
+  argentum_api
+  argentum_persist
+  argentum_trading
+  argentum_risk
+  argentum_engine
+  argentum_bus
+  argentum_codec
+  argentum_core
+)
+add_test(NAME event_journal_replay_test COMMAND event_journal_replay_test)
+
+add_executable(event_journal_async_test event_journal_async_test.cpp)
+target_link_libraries(event_journal_async_test PRIVATE
+  argentum_persist
+  argentum_core
+)
+add_test(NAME event_journal_async_test COMMAND event_journal_async_test)
+
+add_executable(fix_adapter_test fix_adapter_test.cpp)
+target_link_libraries(fix_adapter_test PRIVATE
+  argentum_gateway
+  argentum_datafeed
+  argentum_core
+)
+add_test(NAME fix_adapter_test COMMAND fix_adapter_test)
+
+add_executable(smart_router_test smart_router_test.cpp)
+target_link_libraries(smart_router_test PRIVATE argentum_gateway argentum_core)
+add_test(NAME smart_router_test COMMAND smart_router_test)
+
+add_executable(market_simulator_test market_simulator_test.cpp)
+target_link_libraries(market_simulator_test PRIVATE argentum_gateway argentum_core)
+add_test(NAME market_simulator_test COMMAND market_simulator_test)
+
+add_executable(router_l2_reroute_test router_l2_reroute_test.cpp)
+target_link_libraries(router_l2_reroute_test PRIVATE argentum_gateway argentum_core)
+add_test(NAME router_l2_reroute_test COMMAND router_l2_reroute_test)
+
+add_executable(execution_quality_report_test execution_quality_report_test.cpp)
+target_link_libraries(execution_quality_report_test PRIVATE argentum_gateway argentum_core)
+add_test(NAME execution_quality_report_test COMMAND execution_quality_report_test)
+
+add_executable(risk_symbol_limits_test risk_symbol_limits_test.cpp)
+target_link_libraries(risk_symbol_limits_test PRIVATE argentum_risk argentum_core)
+add_test(NAME risk_symbol_limits_test COMMAND risk_symbol_limits_test)
+
+add_executable(order_history_cap_test order_history_cap_test.cpp)
+target_link_libraries(order_history_cap_test PRIVATE argentum_trading argentum_risk argentum_engine argentum_core)
+add_test(NAME order_history_cap_test COMMAND order_history_cap_test)
+
+add_executable(order_id_generator_test order_id_generator_test.cpp)
+target_link_libraries(order_id_generator_test PRIVATE argentum_api argentum_trading argentum_risk argentum_engine argentum_core)
+add_test(NAME order_id_generator_test COMMAND order_id_generator_test)
+
+add_executable(ev_gate_test ev_gate_test.cpp)
+target_link_libraries(ev_gate_test PRIVATE argentum_ev argentum_core)
+add_test(NAME ev_gate_test COMMAND ev_gate_test)
+
+add_executable(signal_engine_test signal_engine_test.cpp)
+target_link_libraries(signal_engine_test PRIVATE
+  argentum_signal
+  argentum_ev
+  argentum_trading
+  argentum_risk
+  argentum_engine
+  argentum_persist
+  argentum_core
+)
+add_test(NAME signal_engine_test COMMAND signal_engine_test)
+
+add_executable(risk_daily_loss_test risk_daily_loss_test.cpp)
+target_link_libraries(risk_daily_loss_test PRIVATE argentum_risk argentum_core)
+add_test(NAME risk_daily_loss_test COMMAND risk_daily_loss_test)
+
+add_executable(risk_kill_switch_test risk_kill_switch_test.cpp)
+target_link_libraries(risk_kill_switch_test PRIVATE argentum_risk argentum_core)
+add_test(NAME risk_kill_switch_test COMMAND risk_kill_switch_test)
+
+add_executable(bar_aggregator_test bar_aggregator_test.cpp)
+target_link_libraries(bar_aggregator_test PRIVATE argentum_regime argentum_core)
+add_test(NAME bar_aggregator_test COMMAND bar_aggregator_test)
+
+add_executable(regime_classifier_test regime_classifier_test.cpp)
+target_link_libraries(regime_classifier_test PRIVATE argentum_regime argentum_core)
+add_test(NAME regime_classifier_test COMMAND regime_classifier_test)
+
+add_executable(backtest_metrics_test backtest_metrics_test.cpp)
+target_link_libraries(backtest_metrics_test PRIVATE argentum_backtest argentum_core)
+add_test(NAME backtest_metrics_test COMMAND backtest_metrics_test)
+
+add_executable(backtest_run_strategy_test backtest_run_strategy_test.cpp)
+target_link_libraries(backtest_run_strategy_test PRIVATE
+  argentum_backtest
+  argentum_signal
+  argentum_regime
+  argentum_ev
+  argentum_trading
+  argentum_risk
+  argentum_engine
+  argentum_persist
+  argentum_core
+)
+add_test(NAME backtest_run_strategy_test COMMAND backtest_run_strategy_test)
+
+add_executable(strategy_registry_cusum_test strategy_registry_cusum_test.cpp)
+target_link_libraries(strategy_registry_cusum_test PRIVATE argentum_strategy argentum_ev argentum_core)
+add_test(NAME strategy_registry_cusum_test COMMAND strategy_registry_cusum_test)
+
+add_executable(strategy_registry_sharpe_ev_decay_test strategy_registry_sharpe_ev_decay_test.cpp)
+target_link_libraries(strategy_registry_sharpe_ev_decay_test PRIVATE argentum_strategy argentum_ev argentum_core)
+add_test(NAME strategy_registry_sharpe_ev_decay_test COMMAND strategy_registry_sharpe_ev_decay_test)
+
+add_executable(strategy_registry_lifecycle_test strategy_registry_lifecycle_test.cpp)
+target_link_libraries(strategy_registry_lifecycle_test PRIVATE argentum_strategy argentum_ev argentum_core)
+add_test(NAME strategy_registry_lifecycle_test COMMAND strategy_registry_lifecycle_test)
+
+add_executable(strategy_registry_pending_eval_test strategy_registry_pending_eval_test.cpp)
+target_link_libraries(strategy_registry_pending_eval_test PRIVATE argentum_strategy argentum_ev argentum_core)
+add_test(NAME strategy_registry_pending_eval_test COMMAND strategy_registry_pending_eval_test)
+
+add_executable(signal_engine_lifecycle_integration_test signal_engine_lifecycle_integration_test.cpp)
+target_link_libraries(signal_engine_lifecycle_integration_test PRIVATE
+  argentum_signal
+  argentum_strategy
+  argentum_ev
+  argentum_trading
+  argentum_risk
+  argentum_engine
+  argentum_persist
+  argentum_core
+)
+add_test(NAME signal_engine_lifecycle_integration_test COMMAND signal_engine_lifecycle_integration_test)
+
+add_executable(backtest_regime_report_test backtest_regime_report_test.cpp)
+target_link_libraries(backtest_regime_report_test PRIVATE
+  argentum_backtest
+  argentum_signal
+  argentum_strategy
+  argentum_regime
+  argentum_ev
+  argentum_trading
+  argentum_risk
+  argentum_engine
+  argentum_persist
+  argentum_core
+)
+add_test(NAME backtest_regime_report_test COMMAND backtest_regime_report_test)
+
+add_executable(backtest_walk_forward_test backtest_walk_forward_test.cpp)
+target_link_libraries(backtest_walk_forward_test PRIVATE
+  argentum_backtest
+  argentum_signal
+  argentum_strategy
+  argentum_regime
+  argentum_ev
+  argentum_trading
+  argentum_risk
+  argentum_engine
+  argentum_persist
+  argentum_core
+)
+add_test(NAME backtest_walk_forward_test COMMAND backtest_walk_forward_test)
+
+add_executable(backtest_cost_sensitivity_test backtest_cost_sensitivity_test.cpp)
+target_link_libraries(backtest_cost_sensitivity_test PRIVATE
+  argentum_backtest
+  argentum_signal
+  argentum_strategy
+  argentum_regime
+  argentum_ev
+  argentum_trading
+  argentum_risk
+  argentum_engine
+  argentum_persist
+  argentum_core
+)
+add_test(NAME backtest_cost_sensitivity_test COMMAND backtest_cost_sensitivity_test)

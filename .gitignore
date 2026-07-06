@@ -1,0 +1,34 @@
+# Build artifacts
+/build/
+/build-*/
+/dist/
+/CMakeFiles/
+/CMakeCache.txt
+/*.o
+/*.obj
+/*.exe
+/*.dll
+/*.so
+/*.dylib
+
+# Data: ignore runtime/scratch journals, keep versioned fixtures
+/data/*
+!/data/sample_ticks.jsonl
+!/data/market_ticks.csv
+
+# CMake
+cmake-build-*/
+
+# IDE
+.vs/
+*.user
+
+# Logs
+*.log
+
+# Local docker volumes
+infra/timescale_data/
+
+# OS
+.DS_Store
+Thumbs.db

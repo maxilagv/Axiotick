@@ -1,0 +1,35 @@
+namespace argentum;
+
+enum Side : byte { BUY = 1, SELL = 2 }
+
+table MarketTick {
+  timestamp_ns: ulong;
+  price: double;
+  quantity: double;
+  symbol: string;
+  source: string;
+  side: Side;
+}
+
+table Order {
+  order_id: ulong;
+  client_id: ulong;
+  timestamp_ns: ulong;
+  price: double;
+  quantity: double;
+  symbol: string;
+  side: Side;
+  type: ubyte;
+}
+
+table Trade {
+  trade_id: ulong;
+  maker_order_id: ulong;
+  taker_order_id: ulong;
+  timestamp_ns: ulong;
+  price: double;
+  quantity: double;
+  side: Side;
+}
+
+root_type MarketTick;

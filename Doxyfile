@@ -1,0 +1,14 @@
+# Doxyfile 1.9.1
+
+PROJECT_NAME           = "Axiotick"
+PROJECT_NUMBER         = "1.0.0"
+PROJECT_BRIEF          = "Low-latency quantitative trading platform"
+OUTPUT_DIRECTORY       = docs/doxygen
+INPUT                  = backend/include backend/modules backend/apps backend/benchmarks
+RECURSIVE              = YES
+OPTIMIZE_OUTPUT_FOR_C  = YES
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+GENERATE_LATEX         = NO
+GENERATE_HTML          = YES
+HTML_TIMESTAMP         = YES
