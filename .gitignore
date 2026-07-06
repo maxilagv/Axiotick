@@ -32,3 +32,23 @@ infra/timescale_data/
 # OS
 .DS_Store
 Thumbs.db
+
+# Secrets and local credentials: never commit real values.
+# Keep committing *.example files as documented templates.
+.env
+.env.*
+!.env.example
+!*.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+id_rsa*
+id_ed25519*
+credentials.json
+secrets.json
+secrets.yml
+secrets.yaml
+*.secrets
+.netrc
