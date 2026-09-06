@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/latency_histogram.hpp"
+#include "core/trace_context.hpp"
 #include "ev/ev_gate.hpp"
 #include "signal/signal_types.hpp"
 #include "strategy/strategy_registry.hpp"
@@ -10,7 +12,6 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <vector>
 
 namespace argentum::trading {
 class OrderManager;
@@ -31,6 +32,7 @@ struct GateLatencySnapshot {
     uint64_t p50_ns = 0;
     uint64_t p95_ns = 0;
     uint64_t p99_ns = 0;
+    uint64_t p999_ns = 0;
     uint64_t max_ns = 0;
 };
 
@@ -57,12 +59,18 @@ public:
         strategy::StrategyRegistryConfig registry{};
         uint64_t first_signal_id = 1;
         uint64_t first_order_id = 1'000'000;  // demo/local default; compose with the API id generator in service builds
+        /// Full per-stage spans go to the audit event for 1-in-N accepted
+        /// decisions; every reject carries them (tails must stay observable).
+        uint32_t trace_audit_sample_every = 64;
     };
 
     SignalEngine(Config config, std::shared_ptr<trading::OrderManager> oms);
 
     /// Evaluates one candidate end-to-end. Thread-safe.
-    Signal process(const SignalCandidate& candidate);
+    /// When `trace` is provided the engine stamps SignalEvalStart/GateVerdict
+    /// (and downstream OMS stages) into it, and adopts trace->tick_id as the
+    /// candidate's origin_tick_id when the strategy did not set one.
+    Signal process(const SignalCandidate& candidate, core::TraceSpans* trace = nullptr);
 
     /// Feeds a market tick to the lifecycle registry so pending horizon
     /// evaluations of `symbol` can resolve. Call alongside mark_to_market.
@@ -81,7 +89,7 @@ public:
 
 private:
     void record_gate_latency(uint64_t latency_ns);
-    void audit_decision(const Signal& signal) const;
+    void audit_decision(const Signal& signal, const core::TraceSpans* trace) const;
     static std::string build_decision_reason(const Signal& signal);
 
     Config config_;
@@ -93,7 +101,7 @@ private:
 
     mutable std::mutex mutex_;
     SignalEngineStats stats_{};
-    std::vector<uint64_t> gate_latency_samples_;
+    core::LatencyHistogram gate_latency_hist_;
 };
 
 } // namespace argentum::signal

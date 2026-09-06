@@ -1,11 +1,11 @@
 #include "api/market_gateway.hpp"
 #include "bus/message_bus.hpp"
+#include "core/time_utils.hpp"
 #include "engine/order_book.hpp"
 #include "persist/event_journal.hpp"
 #include "risk/risk_manager.hpp"
 #include "trading/order_manager.hpp"
 
-#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
@@ -37,7 +37,7 @@ Order make_order(
 }
 
 int main() {
-    const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto nonce = argentum::core::mono_now_ns();
     const std::string journal_path = "data/test_order_events_" + std::to_string(nonce) + ".jsonl";
     std::error_code ec;
     std::filesystem::remove(journal_path, ec);

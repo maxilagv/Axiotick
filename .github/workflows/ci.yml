@@ -3,6 +3,12 @@ name: ci
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      run_benchmarks:
+        description: "Run latency benchmarks and the regression gate"
+        type: boolean
+        default: false
 
 jobs:
   backend-windows:
@@ -15,6 +21,38 @@ jobs:
         run: cmake --build build --config Release
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+
+  clock-discipline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check clock discipline (ADR 0014)
+        run: python3 scripts/check_clock_discipline.py
+
+  # Manual-trigger only: shared runners have noisy latency, so this gate is
+  # informative until thresholds are recalibrated for CI hardware.
+  benchmarks:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_benchmarks
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Run benchmarks
+        run: |
+          .\build\bin\Release\argentum_matching_benchmark.exe benchmarks_out\matching.json
+          .\build\bin\Release\argentum_regime_benchmark.exe benchmarks_out\regime.json
+          .\build\bin\Release\argentum_risk_benchmark.exe benchmarks_out\risk.json
+          .\build\bin\Release\argentum_pipeline_benchmark.exe benchmarks_out\pipeline.json
+      - name: Regression gate
+        run: python scripts/check_benchmarks.py benchmarks_out/matching.json benchmarks_out/regime.json benchmarks_out/risk.json benchmarks_out/pipeline.json
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmarks_out/
 
   lint-format:
     runs-on: ubuntu-latest

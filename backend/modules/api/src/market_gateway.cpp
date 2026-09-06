@@ -75,6 +75,12 @@ void MarketGatewayService::on_market_message(const void* data, size_t size) {
         return;
     }
 
+    // Ingress stamp (ADR 0014): the first instant this process owned the
+    // tick. Upstream producers that already stamped it win — never overwrite.
+    if (tick.ingress_ns == 0) {
+        tick.ingress_ns = core::wall_now_ns();
+    }
+
     std::lock_guard<std::mutex> lock(mutex_);
     latest_ticks_[normalize_key(tick.symbol)] = tick;
     ticks_decoded_.fetch_add(1, std::memory_order_relaxed);
@@ -102,17 +108,16 @@ std::string MarketGatewayService::health_json() const {
 }
 
 bool MarketGatewayService::consume_rate_limit(const std::string& key) {
-    const auto now = std::chrono::steady_clock::now();
-    const auto window = std::chrono::milliseconds(security_.rate_limit.window_ms == 0
-        ? 1
-        : security_.rate_limit.window_ms);
+    const uint64_t now_ns = core::mono_now_ns();
+    const uint64_t window_ns = static_cast<uint64_t>(
+        security_.rate_limit.window_ms == 0 ? 1 : security_.rate_limit.window_ms) * 1'000'000ULL;
 
     auto& state = rate_windows_[key];
-    if (state.window_start.time_since_epoch().count() == 0) {
-        state.window_start = now;
+    if (state.window_start_mono_ns == 0) {
+        state.window_start_mono_ns = now_ns;
     }
-    if (now - state.window_start >= window) {
-        state.window_start = now;
+    if (now_ns - state.window_start_mono_ns >= window_ns) {
+        state.window_start_mono_ns = now_ns;
         state.requests = 0;
     }
 

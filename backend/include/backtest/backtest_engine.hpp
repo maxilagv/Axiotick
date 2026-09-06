@@ -3,6 +3,7 @@
 #include "core/types.h"
 #include "analysis/strategy.hpp"
 #include "backtest/backtest_metrics.hpp"
+#include "core/pipeline_telemetry.hpp"
 #include "ev/ev_gate.hpp"
 #include "regime/regime_classifier.hpp"
 #include "regime/regime_types.hpp"
@@ -78,6 +79,9 @@ struct StrategyBacktestReport {
     std::array<RegimeMetrics, regime::kRegimeCount> by_regime{};
     std::vector<strategy::TransitionEvent> lifecycle_transitions;
     strategy::StrategyHealthSnapshot final_health{};
+    // Mode B runs the exact production decision path, so it also measures it:
+    // per-stage and wire-to-decision percentiles from the run's TraceSpans.
+    core::PipelineLatencyReport pipeline_latency{};
 };
 
 using StrategyFactory = std::function<std::shared_ptr<signal::CandidateStrategy>()>;

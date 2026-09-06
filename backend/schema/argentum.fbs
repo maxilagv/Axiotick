@@ -9,6 +9,7 @@ table MarketTick {
   symbol: string;
   source: string;
   side: Side;
+  ingress_ns: ulong;  // appended field: absent in old buffers, reads as 0 ("not stamped")
 }
 
 table Order {

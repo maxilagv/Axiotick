@@ -1,7 +1,7 @@
+#include "core/time_utils.hpp"
 #include "persist/event_journal.hpp"
 
 #include <atomic>
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -50,22 +50,21 @@ int main() {
             }
         });
 
-        const auto start = std::chrono::steady_clock::now();
+        const uint64_t start_ns = argentum::core::mono_now_ns();
         for (size_t i = 0; i < kTotal; ++i) {
             auto event = make_event(static_cast<uint64_t>(i + 1));
             while (!ring->try_push(std::move(event))) {
                 std::this_thread::yield();
             }
         }
-        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - start);
+        const uint64_t elapsed_ms = (argentum::core::mono_now_ns() - start_ns) / 1'000'000ULL;
 
         consumer.join();
         CHECK(consumed.load(std::memory_order_acquire) == kTotal);
-        CHECK(elapsed.count() < 100);
+        CHECK(elapsed_ms < 100);
     }
 
-    const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto nonce = argentum::core::mono_now_ns();
     const std::string journal_path = "data/test_async_journal_" + std::to_string(nonce) + ".jsonl";
     const std::string gap_path = "data/test_async_journal_gap_" + std::to_string(nonce) + ".jsonl";
     std::error_code ec;
@@ -78,14 +77,14 @@ int main() {
             CHECK(journal->append(make_event(i)));
         }
 
-        const auto flush_start = std::chrono::steady_clock::now();
+        const uint64_t flush_start_ns = argentum::core::mono_now_ns();
         journal->flush();
-        const auto flush_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - flush_start);
+        const uint64_t flush_elapsed_ms =
+            (argentum::core::mono_now_ns() - flush_start_ns) / 1'000'000ULL;
 
         CHECK(journal->dropped_events() == 0);
         CHECK(journal->written_events() == 2048);
-        CHECK(flush_elapsed.count() < 100);
+        CHECK(flush_elapsed_ms < 100);
 
         const auto latency = journal->latency_snapshot();
         CHECK(latency.samples > 0);

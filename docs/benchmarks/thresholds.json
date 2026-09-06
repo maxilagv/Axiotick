@@ -1,0 +1,25 @@
+{
+  "note": "Per-case latency ceilings (ns) for scripts/check_benchmarks.py. Calibrated from the 2026-07-08 baseline on the reference machine (AMD Ryzen 5 5500, Windows 11, MSVC Release) at ~2x measured values — deliberately generous while variance data accumulates; tighten as runs accumulate. max_ns is not gated: single-sample scheduler noise.",
+  "cases": {
+    "order_book_match_and_refill": {
+      "p50_ns": 250,
+      "p99_ns": 500,
+      "p999_ns": 2000
+    },
+    "regime_classifier_on_bar": {
+      "p50_ns": 900,
+      "p99_ns": 1600,
+      "p999_ns": 5000
+    },
+    "risk_check_order_mixed": {
+      "p50_ns": 500,
+      "p99_ns": 2500,
+      "p999_ns": 8000
+    },
+    "tick_encode_publish_consume_decode": {
+      "p50_ns": 1500,
+      "p99_ns": 300000,
+      "p999_ns": 800000
+    }
+  }
+}

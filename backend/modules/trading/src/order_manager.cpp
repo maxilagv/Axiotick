@@ -15,8 +15,11 @@ OrderManager::OrderManager(std::shared_ptr<risk::RiskManager> risk,
       order_book_(std::move(book)),
       journal_(std::move(journal)) {}
 
-OrderSubmissionResult OrderManager::submit_order(const Order& order, uint64_t related_signal_id) {
+OrderSubmissionResult OrderManager::submit_order(const Order& order,
+                                                 uint64_t related_signal_id,
+                                                 core::TraceSpans* trace) {
     OrderSubmissionResult result{};
+    const uint64_t tick_id = trace ? trace->tick_id : 0;
     Order normalized = order;
     core::normalize_order_scalars(&normalized);
     result.remaining_quantity = normalized.quantity;
@@ -31,7 +34,7 @@ OrderSubmissionResult OrderManager::submit_order(const Order& order, uint64_t re
         result.reject_reason = OrderRejectReason::InvalidOrder;
         result.status = OrderStatus::Rejected;
         emit_event_unlocked(persist::JournalEvent{
-            .timestamp_ns = core::unix_now_ns(),
+            .timestamp_ns = core::wall_now_ns(),
             .type = persist::JournalEventType::OrderRejected,
             .order_id = normalized.order_id,
             .price_ticks = normalized.price_ticks,
@@ -41,8 +44,9 @@ OrderSubmissionResult OrderManager::submit_order(const Order& order, uint64_t re
             .side = normalized.side,
             .order_type = normalized.type,
             .tif = normalized.tif,
-            .related_signal_id = related_signal_id
-        });
+            .related_signal_id = related_signal_id,
+            .tick_id = tick_id
+        }, trace);
         return result;
     }
 
@@ -53,7 +57,7 @@ OrderSubmissionResult OrderManager::submit_order(const Order& order, uint64_t re
         result.reject_reason = OrderRejectReason::DuplicateOrderId;
         result.status = OrderStatus::Rejected;
         emit_event_unlocked(persist::JournalEvent{
-            .timestamp_ns = core::unix_now_ns(),
+            .timestamp_ns = core::wall_now_ns(),
             .type = persist::JournalEventType::OrderRejected,
             .order_id = normalized.order_id,
             .price_ticks = normalized.price_ticks,
@@ -63,8 +67,9 @@ OrderSubmissionResult OrderManager::submit_order(const Order& order, uint64_t re
             .side = normalized.side,
             .order_type = normalized.type,
             .tif = normalized.tif,
-            .related_signal_id = related_signal_id
-        });
+            .related_signal_id = related_signal_id,
+            .tick_id = tick_id
+        }, trace);
         return result;
     }
 
@@ -79,7 +84,9 @@ OrderSubmissionResult OrderManager::submit_order(const Order& order, uint64_t re
             rejected.remaining_lots = normalized.quantity_lots;
             rejected.status = OrderStatus::Rejected;
             rejected.reject_reason = result.reject_reason;
-            rejected.updated_at_ns = core::unix_now_ns();
+            rejected.updated_at_ns = core::wall_now_ns();
+            rejected.related_signal_id = related_signal_id;
+            rejected.origin_tick_id = tick_id;
             upsert_state(rejected);
             emit_event_unlocked(persist::JournalEvent{
                 .timestamp_ns = rejected.updated_at_ns,
@@ -92,13 +99,18 @@ OrderSubmissionResult OrderManager::submit_order(const Order& order, uint64_t re
                 .side = normalized.side,
                 .order_type = normalized.type,
                 .tif = normalized.tif,
-                .related_signal_id = related_signal_id
-            });
+                .related_signal_id = related_signal_id,
+                .tick_id = tick_id
+            }, trace);
             return result;
         }
     }
 
-    if (!risk_manager_->check_order(normalized)) {
+    const bool risk_accepted = risk_manager_->check_order(normalized);
+    if (trace) {
+        trace->stamp(core::TraceStage::RiskVerdict);
+    }
+    if (!risk_accepted) {
         result.reject_reason = OrderRejectReason::RiskRejected;
         result.status = OrderStatus::Rejected;
         OrderState rejected{};
@@ -107,7 +119,9 @@ OrderSubmissionResult OrderManager::submit_order(const Order& order, uint64_t re
         rejected.remaining_lots = normalized.quantity_lots;
         rejected.status = OrderStatus::Rejected;
         rejected.reject_reason = result.reject_reason;
-        rejected.updated_at_ns = core::unix_now_ns();
+        rejected.updated_at_ns = core::wall_now_ns();
+        rejected.related_signal_id = related_signal_id;
+        rejected.origin_tick_id = tick_id;
         upsert_state(rejected);
         emit_event_unlocked(persist::JournalEvent{
             .timestamp_ns = rejected.updated_at_ns,
@@ -120,8 +134,9 @@ OrderSubmissionResult OrderManager::submit_order(const Order& order, uint64_t re
             .side = normalized.side,
             .order_type = normalized.type,
             .tif = normalized.tif,
-            .related_signal_id = related_signal_id
-        });
+            .related_signal_id = related_signal_id,
+            .tick_id = tick_id
+        }, trace);
         ARGENTUM_LOG(WARN, "[OMS] order rejected by risk order_id=" << normalized.order_id);
         return result;
     }
@@ -130,8 +145,10 @@ OrderSubmissionResult OrderManager::submit_order(const Order& order, uint64_t re
     taker_state.order = normalized;
     taker_state.initial_lots = normalized.quantity_lots;
     taker_state.remaining_lots = normalized.quantity_lots;
-    taker_state.updated_at_ns = core::unix_now_ns();
+    taker_state.updated_at_ns = core::wall_now_ns();
     taker_state.status = OrderStatus::New;
+    taker_state.related_signal_id = related_signal_id;
+    taker_state.origin_tick_id = tick_id;
 
     const bool rest_residual = (normalized.type == ORDER_TYPE_LIMIT && normalized.tif == TIF_GTC);
     result.trades = order_book_->match_order(normalized, rest_residual);
@@ -154,8 +171,9 @@ OrderSubmissionResult OrderManager::submit_order(const Order& order, uint64_t re
             .side = taker_fill.side,
             .order_type = taker_fill.type,
             .tif = taker_fill.tif,
-            .related_signal_id = related_signal_id
-        });
+            .related_signal_id = related_signal_id,
+            .tick_id = tick_id
+        }, trace);
         result.filled_quantity += trade.quantity;
         taker_state.filled_lots += trade.quantity_lots;
         taker_state.remaining_lots = std::max<int64_t>(0, taker_state.remaining_lots - trade.quantity_lots);
@@ -173,7 +191,7 @@ OrderSubmissionResult OrderManager::submit_order(const Order& order, uint64_t re
         residual.quantity = core::from_quantity_lots(taker_state.remaining_lots);
         taker_state.order = residual;
         taker_state.status = (taker_state.filled_lots > 0) ? OrderStatus::PartiallyFilled : OrderStatus::Resting;
-        taker_state.updated_at_ns = core::unix_now_ns();
+        taker_state.updated_at_ns = core::wall_now_ns();
         active_orders_[residual.order_id] = taker_state;
         upsert_state(taker_state);
         emit_event_unlocked(persist::JournalEvent{
@@ -188,8 +206,9 @@ OrderSubmissionResult OrderManager::submit_order(const Order& order, uint64_t re
             .order_type = residual.type,
             .tif = residual.tif,
             .resting = true,
-            .related_signal_id = related_signal_id
-        });
+            .related_signal_id = related_signal_id,
+            .tick_id = tick_id
+        }, trace);
         ARGENTUM_LOG(
             INFO,
             "[OMS] order accepted order_id=" << normalized.order_id
@@ -207,7 +226,7 @@ OrderSubmissionResult OrderManager::submit_order(const Order& order, uint64_t re
         taker_state.remaining_lots = 0;
         taker_state.order.quantity_lots = 0;
         taker_state.order.quantity = 0.0;
-        taker_state.updated_at_ns = core::unix_now_ns();
+        taker_state.updated_at_ns = core::wall_now_ns();
         upsert_state(taker_state);
         emit_event_unlocked(persist::JournalEvent{
             .timestamp_ns = taker_state.updated_at_ns,
@@ -221,13 +240,17 @@ OrderSubmissionResult OrderManager::submit_order(const Order& order, uint64_t re
             .order_type = normalized.type,
             .tif = normalized.tif,
             .resting = false,
-            .related_signal_id = related_signal_id
-        });
+            .related_signal_id = related_signal_id,
+            .tick_id = tick_id
+        }, trace);
         ARGENTUM_LOG(INFO, "[OMS] order fully processed order_id=" << normalized.order_id);
     }
 
     result.accepted = true;
     result.status = taker_state.status;
+    if (trace) {
+        trace->stamp(core::TraceStage::OmsAccept);
+    }
     return result;
 }
 
@@ -246,7 +269,7 @@ bool OrderManager::cancel_order(uint64_t order_id) {
     state.order.quantity_lots = 0;
     state.order.quantity = 0.0;
     state.remaining_lots = 0;
-    state.updated_at_ns = core::unix_now_ns();
+    state.updated_at_ns = core::wall_now_ns();
     active_orders_.erase(it);
     upsert_state(state);
     emit_event_unlocked(persist::JournalEvent{
@@ -260,7 +283,9 @@ bool OrderManager::cancel_order(uint64_t order_id) {
         .side = state.order.side,
         .order_type = state.order.type,
         .tif = state.order.tif,
-        .resting = false
+        .resting = false,
+        .related_signal_id = state.related_signal_id,
+        .tick_id = state.origin_tick_id
     });
     ARGENTUM_LOG(INFO, "[OMS] order canceled order_id=" << order_id);
     return true;
@@ -286,7 +311,7 @@ bool OrderManager::cancel_order_partial(uint64_t order_id, double quantity) {
         state.remaining_lots = 0;
         state.order.quantity_lots = 0;
         state.order.quantity = 0.0;
-        state.updated_at_ns = core::unix_now_ns();
+        state.updated_at_ns = core::wall_now_ns();
         active_orders_.erase(it);
         upsert_state(state);
         emit_event_unlocked(persist::JournalEvent{
@@ -300,7 +325,9 @@ bool OrderManager::cancel_order_partial(uint64_t order_id, double quantity) {
             .side = state.order.side,
             .order_type = state.order.type,
             .tif = state.order.tif,
-            .resting = false
+            .resting = false,
+            .related_signal_id = state.related_signal_id,
+            .tick_id = state.origin_tick_id
         });
         return true;
     }
@@ -311,7 +338,7 @@ bool OrderManager::cancel_order_partial(uint64_t order_id, double quantity) {
     state.remaining_lots = updated.quantity_lots;
     state.filled_lots = state.initial_lots - state.remaining_lots;
     state.status = (state.filled_lots > 0) ? OrderStatus::PartiallyFilled : OrderStatus::Resting;
-    state.updated_at_ns = core::unix_now_ns();
+    state.updated_at_ns = core::wall_now_ns();
 
     const int64_t released = std::max<int64_t>(0, old_remaining - state.remaining_lots);
     if (released > 0) {
@@ -332,7 +359,9 @@ bool OrderManager::cancel_order_partial(uint64_t order_id, double quantity) {
         .side = state.order.side,
         .order_type = state.order.type,
         .tif = state.order.tif,
-        .resting = true
+        .resting = true,
+        .related_signal_id = state.related_signal_id,
+        .tick_id = state.origin_tick_id
     });
     return true;
 }
@@ -366,7 +395,7 @@ bool OrderManager::modify_order(uint64_t order_id, double new_price, double new_
     state.remaining_lots = replacement.quantity_lots;
     state.filled_lots = 0;
     state.status = OrderStatus::Resting;
-    state.updated_at_ns = core::unix_now_ns();
+    state.updated_at_ns = core::wall_now_ns();
     upsert_state(state);
     emit_event_unlocked(persist::JournalEvent{
         .timestamp_ns = state.updated_at_ns,
@@ -379,7 +408,9 @@ bool OrderManager::modify_order(uint64_t order_id, double new_price, double new_
         .side = state.order.side,
         .order_type = state.order.type,
         .tif = state.order.tif,
-        .resting = true
+        .resting = true,
+        .related_signal_id = state.related_signal_id,
+        .tick_id = state.origin_tick_id
     });
     return true;
 }
@@ -460,7 +491,7 @@ void OrderManager::apply_trade_to_maker(uint64_t maker_order_id, const Trade& tr
     maker.order.quantity_lots = maker.remaining_lots;
     maker.order.quantity = core::from_quantity_lots(maker.remaining_lots);
     maker.status = (maker.remaining_lots == 0) ? OrderStatus::Filled : OrderStatus::PartiallyFilled;
-    maker.updated_at_ns = core::unix_now_ns();
+    maker.updated_at_ns = core::wall_now_ns();
 
     if (maker.remaining_lots == 0) {
         upsert_state(maker);
@@ -470,12 +501,17 @@ void OrderManager::apply_trade_to_maker(uint64_t maker_order_id, const Trade& tr
     upsert_state(maker);
 }
 
-void OrderManager::emit_event_unlocked(persist::JournalEvent&& event) {
+void OrderManager::emit_event_unlocked(persist::JournalEvent&& event, core::TraceSpans* trace) {
     if (!journal_) return;
     if (event.timestamp_ns == 0) {
-        event.timestamp_ns = core::unix_now_ns();
+        event.timestamp_ns = core::wall_now_ns();
     }
     (void)journal_->append(event);
+    if (trace) {
+        // First-write-wins: only the first journal event of the decision
+        // defines the JournalEnqueue boundary.
+        trace->stamp(core::TraceStage::JournalEnqueue);
+    }
 }
 
 } // namespace argentum::trading

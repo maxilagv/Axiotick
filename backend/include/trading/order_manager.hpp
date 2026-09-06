@@ -5,6 +5,7 @@
 #include "engine/order_book.hpp"
 #include "core/fixed_point.hpp"
 #include "core/time_utils.hpp"
+#include "core/trace_context.hpp"
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -46,6 +47,11 @@ struct OrderState {
     OrderStatus status = OrderStatus::New;
     OrderRejectReason reject_reason = OrderRejectReason::None;
     uint64_t updated_at_ns = 0;
+    // Origin correlation, remembered for the order's whole lifecycle so that
+    // cancel/replace journal events keep pointing at the originating signal
+    // and tick (they used to journal related_signal_id = 0).
+    uint64_t related_signal_id = 0;
+    uint64_t origin_tick_id = 0;
 };
 
 struct OrderSubmissionResult {
@@ -72,8 +78,14 @@ public:
      * @brief Entry point for new orders from API/Strategy.
      * @param related_signal_id Optional id of the signal_decision audit event
      *        that produced this order; journaled for replay correlation.
+     * @param trace Optional wire-to-wire trace context: RiskVerdict/OmsAccept/
+     *        JournalEnqueue stages are stamped into it and its tick_id is
+     *        journaled with every event of this order (including later
+     *        cancels/replaces via OrderState).
      */
-    OrderSubmissionResult submit_order(const Order& order, uint64_t related_signal_id = 0);
+    OrderSubmissionResult submit_order(const Order& order,
+                                       uint64_t related_signal_id = 0,
+                                       core::TraceSpans* trace = nullptr);
 
     bool cancel_order(uint64_t order_id);
     bool cancel_order_partial(uint64_t order_id, double quantity);
@@ -88,7 +100,7 @@ private:
     void upsert_state(const OrderState& state);
     void enforce_history_cap_unlocked();
     void apply_trade_to_maker(uint64_t maker_order_id, const Trade& trade);
-    void emit_event_unlocked(persist::JournalEvent&& event);
+    void emit_event_unlocked(persist::JournalEvent&& event, core::TraceSpans* trace = nullptr);
 
     struct HistoryEntry {
         uint64_t order_id = 0;

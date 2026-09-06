@@ -26,6 +26,7 @@ struct SignalCandidate {
     double price = 0.0;               // reference/limit price for the candidate order
     double quantity = 0.0;            // pre-haircut quantity
     uint64_t timestamp_ns = 0;        // 0 = stamped by the engine
+    uint64_t origin_tick_id = 0;      // trace id of the tick that produced this candidate (0 = unknown)
     ev::EVInputs ev_inputs{};
     regime::RegimeLabel regime = regime::RegimeLabel::Unknown;
     double regime_confidence = 0.0;

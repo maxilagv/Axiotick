@@ -184,17 +184,6 @@ bool load_tail_stats(const std::string& path, uint64_t* out_last_seq, uint64_t* 
     return true;
 }
 
-uint64_t percentile_value(std::vector<uint64_t> values, double percentile) {
-    if (values.empty()) {
-        return 0;
-    }
-
-    std::sort(values.begin(), values.end());
-    const double raw_index = percentile * static_cast<double>(values.size() - 1);
-    const size_t index = static_cast<size_t>(raw_index);
-    return values[index];
-}
-
 } // namespace
 
 AsyncEventJournal::AsyncEventJournal(std::string path)
@@ -236,7 +225,6 @@ AsyncEventJournal::AsyncEventJournal(std::string path)
     (void)fcntl(wake_pipe_write_, F_SETFL, O_NONBLOCK);
 #endif
 
-    latency_samples_.reserve(4096);
     worker_ = std::thread(&AsyncEventJournal::worker_loop, this);
 }
 
@@ -311,17 +299,19 @@ size_t AsyncEventJournal::pending_events() const {
 }
 
 JournalLatencySnapshot AsyncEventJournal::latency_snapshot() const {
-    std::lock_guard<std::mutex> lock(latency_mutex_);
-    JournalLatencySnapshot snapshot{};
-    snapshot.samples = latency_samples_.size();
-    if (latency_samples_.empty()) {
-        return snapshot;
+    core::LatencyReport report{};
+    {
+        std::lock_guard<std::mutex> lock(latency_mutex_);
+        report = latency_hist_.report();
     }
 
-    snapshot.p50_ns = percentile_value(latency_samples_, 0.50);
-    snapshot.p95_ns = percentile_value(latency_samples_, 0.95);
-    snapshot.p99_ns = percentile_value(latency_samples_, 0.99);
-    snapshot.max_ns = *std::max_element(latency_samples_.begin(), latency_samples_.end());
+    JournalLatencySnapshot snapshot{};
+    snapshot.samples = report.samples;
+    snapshot.p50_ns = report.p50_ns;
+    snapshot.p95_ns = report.p95_ns;
+    snapshot.p99_ns = report.p99_ns;
+    snapshot.p999_ns = report.p999_ns;
+    snapshot.max_ns = report.max_ns;
     return snapshot;
 }
 
@@ -353,7 +343,7 @@ JournalEvent AsyncEventJournal::prepare_event(JournalEvent&& event) {
 
     uint64_t timestamp_ns = event.timestamp_ns;
     if (timestamp_ns == 0) {
-        timestamp_ns = core::unix_now_ns();
+        timestamp_ns = core::wall_now_ns();
     }
 
     uint64_t previous = last_timestamp_ns_.load(std::memory_order_relaxed);
@@ -373,7 +363,7 @@ JournalEvent AsyncEventJournal::prepare_event(JournalEvent&& event) {
         }
     }
 
-    event.enqueued_at_ns = core::now_ns();
+    event.enqueued_at_ns = core::mono_now_ns();
     return event;
 }
 
@@ -401,6 +391,7 @@ void AsyncEventJournal::write_event(const JournalEvent& event) {
           << ",\"order_id\":" << event.order_id
           << ",\"related_order_id\":" << event.related_order_id
           << ",\"related_signal_id\":" << event.related_signal_id
+          << ",\"tick_id\":" << event.tick_id
           << ",\"price_ticks\":" << event.price_ticks
           << ",\"quantity_lots\":" << event.quantity_lots
           << ",\"remaining_lots\":" << event.remaining_lots
@@ -416,7 +407,7 @@ void AsyncEventJournal::write_event(const JournalEvent& event) {
     }
 
     if (event.enqueued_at_ns != 0) {
-        const uint64_t written_at_ns = core::now_ns();
+        const uint64_t written_at_ns = core::mono_now_ns();
         if (written_at_ns >= event.enqueued_at_ns) {
             record_latency_sample(written_at_ns - event.enqueued_at_ns);
         }
@@ -429,11 +420,7 @@ void AsyncEventJournal::write_event(const JournalEvent& event) {
 
 void AsyncEventJournal::record_latency_sample(uint64_t latency_ns) {
     std::lock_guard<std::mutex> lock(latency_mutex_);
-    constexpr size_t kMaxSamples = 4096;
-    if (latency_samples_.size() >= kMaxSamples) {
-        latency_samples_.erase(latency_samples_.begin());
-    }
-    latency_samples_.push_back(latency_ns);
+    latency_hist_.record(latency_ns);
 }
 
 void AsyncEventJournal::wake_worker() {
@@ -586,6 +573,9 @@ bool EventReplayer::replay_file(
         (void)parse_u64_field(line, "order_id", &event.order_id);
         (void)parse_u64_field(line, "related_order_id", &event.related_order_id);
         (void)parse_u64_field(line, "related_signal_id", &event.related_signal_id);
+        // Optional since Block 1 (wire-to-wire latency): absent in older
+        // journals, which must keep replaying unchanged.
+        (void)parse_u64_field(line, "tick_id", &event.tick_id);
         (void)parse_i64_field(line, "price_ticks", &event.price_ticks);
         (void)parse_i64_field(line, "quantity_lots", &event.quantity_lots);
         (void)parse_i64_field(line, "remaining_lots", &event.remaining_lots);

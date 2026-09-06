@@ -38,6 +38,13 @@ struct TopicMetrics {
     uint64_t published = 0;
     uint64_t publish_latency_ns_avg = 0;
     uint64_t publish_latency_ns_max = 0;
+    // Percentiles from the per-topic publish-latency histogram, sampled
+    // 1-in-16 (estimates; counters above stay exact). Zero when the build was
+    // configured with ARGENTUM_ENABLE_LATENCY_TRACE=OFF.
+    uint64_t publish_latency_ns_p50 = 0;
+    uint64_t publish_latency_ns_p95 = 0;
+    uint64_t publish_latency_ns_p99 = 0;
+    uint64_t publish_latency_ns_p999 = 0;
 };
 
 /**

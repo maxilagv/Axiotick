@@ -6,12 +6,16 @@
 
 namespace argentum::core {
 
-uint64_t now_ns() {
+// The ONLY translation unit allowed to touch std::chrono clocks directly
+// (enforced by scripts/check_clock_discipline.py). steady_clock maps to
+// QueryPerformanceCounter on Windows and CLOCK_MONOTONIC on POSIX.
+
+uint64_t mono_now_ns() {
     auto now = std::chrono::steady_clock::now().time_since_epoch();
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
 }
 
-uint64_t unix_now_ns() {
+uint64_t wall_now_ns() {
     auto now = std::chrono::system_clock::now().time_since_epoch();
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
 }
@@ -38,6 +42,30 @@ std::string to_utc(uint64_t ts_ns) {
     char buffer[64];
     format_utc(ts_ns, buffer, sizeof(buffer));
     return std::string(buffer);
+}
+
+ClockCalibration ClockCalibration::measure(int samples) {
+    if (samples < 1) samples = 1;
+
+    ClockCalibration best{};
+    uint64_t best_bracket = UINT64_MAX;
+
+    for (int i = 0; i < samples; ++i) {
+        const uint64_t mono_before = mono_now_ns();
+        const uint64_t wall = wall_now_ns();
+        const uint64_t mono_after = mono_now_ns();
+        if (mono_after < mono_before) continue;  // scheduler artifact; discard
+
+        const uint64_t bracket = mono_after - mono_before;
+        if (bracket < best_bracket) {
+            best_bracket = bracket;
+            best.mono_ns = mono_before + bracket / 2;
+            best.wall_ns = wall;
+            best.uncertainty_ns = bracket / 2;
+        }
+    }
+
+    return best;
 }
 
 } // namespace argentum::core

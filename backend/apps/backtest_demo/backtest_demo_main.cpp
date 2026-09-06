@@ -206,6 +206,29 @@ int main() {
     std::printf("\n--- strategy metrics (fills=%zu) ---\n", report.trades_loaded);
     print_metrics("run", report.metrics);
 
+    // Mode B exercises the exact production decision path, so its latency IS
+    // production decision latency on this host (per-stage, wire-to-decision).
+    const argentum::core::PipelineLatencyReport& lat = report.pipeline_latency;
+    std::printf("\n--- decision-path latency (Mode B == production path, ticks=%llu) ---\n",
+                static_cast<unsigned long long>(lat.ticks_absorbed));
+    auto print_latency_row = [](const char* label, const argentum::core::LatencyReport& r) {
+        if (r.samples == 0) return;
+        std::printf("%-18s samples=%-8llu p50=%-7llu p95=%-7llu p99=%-7llu p99.9=%-8llu max=%llu (ns)\n",
+                    label,
+                    static_cast<unsigned long long>(r.samples),
+                    static_cast<unsigned long long>(r.p50_ns),
+                    static_cast<unsigned long long>(r.p95_ns),
+                    static_cast<unsigned long long>(r.p99_ns),
+                    static_cast<unsigned long long>(r.p999_ns),
+                    static_cast<unsigned long long>(r.max_ns));
+    };
+    for (size_t i = 1; i < argentum::core::kTraceStageCount; ++i) {
+        print_latency_row(argentum::core::to_string(static_cast<argentum::core::TraceStage>(i)),
+                          lat.stage[i]);
+    }
+    print_latency_row("wire->gate", lat.wire_to_gate);
+    print_latency_row("wire->decision", lat.wire_to_decision);
+
     if (report.trades_loaded > 1 && engine.load_trades_from_journal(kJournalPath)) {
         const backtest::MonteCarloReport mc = engine.run_monte_carlo(1'000, 0xB0075742ULL);
         std::printf("\n--- Monte Carlo bootstrap (%zu resamples, per-metric percentiles) ---\n", mc.resamples);

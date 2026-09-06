@@ -865,15 +865,16 @@ std::string HttpWsServer::reason_phrase(int status_code) {
 
 bool HttpWsServer::allow_ip_request(const std::string& ip) {
     if (config_.max_requests_per_ip == 0) return true;
-    const auto now = std::chrono::steady_clock::now();
-    const auto window = std::chrono::milliseconds(config_.ip_window_ms == 0 ? 1 : config_.ip_window_ms);
+    const uint64_t now_ns = core::mono_now_ns();
+    const uint64_t window_ns =
+        static_cast<uint64_t>(config_.ip_window_ms == 0 ? 1 : config_.ip_window_ms) * 1'000'000ULL;
     std::lock_guard<std::mutex> lock(mutex_);
     auto& state = ip_rate_windows_[ip];
-    if (state.window_start.time_since_epoch().count() == 0) {
-        state.window_start = now;
+    if (state.window_start_mono_ns == 0) {
+        state.window_start_mono_ns = now_ns;
     }
-    if (now - state.window_start >= window) {
-        state.window_start = now;
+    if (now_ns - state.window_start_mono_ns >= window_ns) {
+        state.window_start_mono_ns = now_ns;
         state.requests = 0;
     }
     if (state.requests >= config_.max_requests_per_ip) {

@@ -31,7 +31,8 @@ ArgentumStatus encode_market_tick_flatbuffers(const MarketTick& tick, std::vecto
                                               tick.quantity,
                                               symbol,
                                               source,
-                                              static_cast<argentum::Side>(tick.side));
+                                              static_cast<argentum::Side>(tick.side),
+                                              tick.ingress_ns);
     builder.Finish(tick_fb);
 
     uint32_t flags = with_crc ? static_cast<uint32_t>(bus::MessageFlags::HasCrc32) : 0;
@@ -80,6 +81,7 @@ ArgentumStatus decode_market_tick(const void* data, size_t size, MarketTick* out
         }
 
         out->side = static_cast<uint8_t>(tick_fb->side());
+        out->ingress_ns = tick_fb->ingress_ns();
         return ARGENTUM_OK;
     }
 #endif

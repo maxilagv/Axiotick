@@ -12,6 +12,7 @@ int main() {
     std::strncpy(tick.symbol, "BTC/USDT", sizeof(tick.symbol) - 1);
     std::strncpy(tick.source, "BINANCE", sizeof(tick.source) - 1);
     tick.side = SIDE_BUY;
+    tick.ingress_ns = 1700000000000000123ULL;
 
     std::vector<uint8_t> payload;
     assert(argentum::codec::encode_market_tick_legacy(tick, &payload) == ARGENTUM_OK);
@@ -25,6 +26,23 @@ int main() {
     assert(std::strcmp(decoded.symbol, tick.symbol) == 0);
     assert(std::strcmp(decoded.source, tick.source) == 0);
     assert(decoded.side == tick.side);
+    assert(decoded.ingress_ns == tick.ingress_ns);
+
+    // Wire-compat: a V1 payload whose trailing 8 bytes are zero (the layout
+    // before ingress_ns existed) must decode as ingress_ns == 0, all other
+    // fields intact.
+    {
+        MarketTick legacy = tick;
+        legacy.ingress_ns = 0;
+        std::vector<uint8_t> legacy_payload;
+        assert(argentum::codec::encode_market_tick_legacy(legacy, &legacy_payload) == ARGENTUM_OK);
+        MarketTick legacy_decoded{};
+        assert(argentum::codec::decode_market_tick(
+                   legacy_payload.data(), legacy_payload.size(), &legacy_decoded) == ARGENTUM_OK);
+        assert(legacy_decoded.ingress_ns == 0);
+        assert(legacy_decoded.timestamp_ns == tick.timestamp_ns);
+        assert(legacy_decoded.side == tick.side);
+    }
 
     assert(argentum::codec::decode_market_tick(payload.data(), 4, &decoded) == ARGENTUM_ERR_PROTO);
 

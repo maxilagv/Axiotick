@@ -37,5 +37,9 @@ endif()
 
 # Subdirectories
 option(ARGENTUM_USE_FLATBUFFERS "Enable FlatBuffers serialization" OFF)
+# Wire-to-wire latency instrumentation (ADR 0014). Default ON; building with
+# OFF vs ON on argentum_pipeline_benchmark is the measured overhead of the
+# instrumentation itself (Block 1 acceptance gate: < 2% throughput delta).
+option(ARGENTUM_ENABLE_LATENCY_TRACE "Enable wire-to-wire latency trace stamps" ON)
 
 add_subdirectory(backend)

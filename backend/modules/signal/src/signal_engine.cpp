@@ -25,14 +25,20 @@ std::string format_u64(uint64_t value) {
     return std::string(buffer);
 }
 
-uint64_t percentile_value(std::vector<uint64_t> values, double percentile) {
-    if (values.empty()) return 0;
-    std::sort(values.begin(), values.end());
-    const double raw_index = percentile * static_cast<double>(values.size() - 1);
-    return values[static_cast<size_t>(raw_index)];
+std::string format_trace_spans(const core::TraceSpans& trace) {
+    // Compact "stage=mono_ns;..." payload: only stamped stages, canonical order.
+    std::string out;
+    out.reserve(160);
+    for (size_t i = 0; i < core::kTraceStageCount; ++i) {
+        const uint64_t at = trace.mono_ns[i];
+        if (at == 0) continue;
+        if (!out.empty()) out.push_back(';');
+        out += core::to_string(static_cast<core::TraceStage>(i));
+        out.push_back('=');
+        out += format_u64(at);
+    }
+    return out;
 }
-
-constexpr size_t kMaxLatencySamples = 65536;
 
 } // namespace
 
@@ -42,26 +48,34 @@ SignalEngine::SignalEngine(Config config, std::shared_ptr<trading::OrderManager>
       oms_(std::move(oms)),
       registry_(config.registry),
       next_signal_id_(config.first_signal_id),
-      next_order_id_(config.first_order_id) {
-    gate_latency_samples_.reserve(4096);
-}
+      next_order_id_(config.first_order_id) {}
 
-Signal SignalEngine::process(const SignalCandidate& candidate) {
+Signal SignalEngine::process(const SignalCandidate& candidate, core::TraceSpans* trace) {
+    if (trace) {
+        trace->stamp(core::TraceStage::SignalEvalStart);
+    }
+
     Signal signal{};
     signal.candidate = candidate;
     signal.signal_id = next_signal_id_.fetch_add(1, std::memory_order_relaxed);
     if (signal.candidate.timestamp_ns == 0) {
-        signal.candidate.timestamp_ns = core::unix_now_ns();
+        signal.candidate.timestamp_ns = core::wall_now_ns();
+    }
+    if (signal.candidate.origin_tick_id == 0 && trace) {
+        signal.candidate.origin_tick_id = trace->tick_id;
     }
 
     signal.lifecycle_state = strategy_state(signal.candidate.strategy_id);
 
-    const uint64_t gate_start_ns = core::now_ns();
+    const uint64_t gate_start_ns = core::mono_now_ns();
     signal.ev_result = gate_.evaluate(
         signal.candidate.ev_inputs,
         signal.candidate.regime,
         signal.lifecycle_state);
-    record_gate_latency(core::now_ns() - gate_start_ns);
+    record_gate_latency(core::mono_now_ns() - gate_start_ns);
+    if (trace) {
+        trace->stamp(core::TraceStage::GateVerdict);
+    }
 
     if (signal.ev_result.accepted) {
         signal.submitted_quantity = signal.candidate.quantity * signal.ev_result.size_multiplier;
@@ -79,7 +93,7 @@ Signal SignalEngine::process(const SignalCandidate& candidate) {
 
             signal.submitted_order_id = order.order_id;
             const trading::OrderSubmissionResult submission =
-                oms_->submit_order(order, signal.signal_id);
+                oms_->submit_order(order, signal.signal_id, trace);
             signal.order_accepted = submission.accepted;
 
             // Register every immediate fill for horizon evaluation: the
@@ -106,7 +120,7 @@ Signal SignalEngine::process(const SignalCandidate& candidate) {
     }
 
     signal.decision_reason = build_decision_reason(signal);
-    audit_decision(signal);
+    audit_decision(signal, trace);
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -148,40 +162,50 @@ SignalEngineStats SignalEngine::stats() const {
 }
 
 GateLatencySnapshot SignalEngine::gate_latency_snapshot() const {
-    std::vector<uint64_t> samples;
+    core::LatencyReport report{};
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        samples = gate_latency_samples_;
+        report = gate_latency_hist_.report();
     }
 
     GateLatencySnapshot snapshot{};
-    snapshot.samples = samples.size();
-    if (samples.empty()) return snapshot;
-
-    snapshot.p50_ns = percentile_value(samples, 0.50);
-    snapshot.p95_ns = percentile_value(samples, 0.95);
-    snapshot.p99_ns = percentile_value(samples, 0.99);
-    snapshot.max_ns = *std::max_element(samples.begin(), samples.end());
+    snapshot.samples = report.samples;
+    snapshot.p50_ns = report.p50_ns;
+    snapshot.p95_ns = report.p95_ns;
+    snapshot.p99_ns = report.p99_ns;
+    snapshot.p999_ns = report.p999_ns;
+    snapshot.max_ns = report.max_ns;
     return snapshot;
 }
 
 void SignalEngine::record_gate_latency(uint64_t latency_ns) {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (gate_latency_samples_.size() >= kMaxLatencySamples) {
-        gate_latency_samples_.erase(gate_latency_samples_.begin());
-    }
-    gate_latency_samples_.push_back(latency_ns);
+    gate_latency_hist_.record(latency_ns);
 }
 
-void SignalEngine::audit_decision(const Signal& signal) const {
+void SignalEngine::audit_decision(const Signal& signal, const core::TraceSpans* trace) const {
     const SignalCandidate& c = signal.candidate;
     const ev::EVInputs& in = c.ev_inputs;
     const ev::EVResult& r = signal.ev_result;
+
+    // Per-stage spans are audited for every reject and for 1-in-N accepted
+    // decisions: tails stay observable without inflating the audit log.
+    std::string trace_spans;
+    if (trace) {
+        const uint32_t every = (config_.trace_audit_sample_every == 0)
+            ? 1
+            : config_.trace_audit_sample_every;
+        if (!r.accepted || (signal.signal_id % every) == 0) {
+            trace_spans = format_trace_spans(*trace);
+        }
+    }
 
     audit::Logger::instance().structured_log(
         audit::LogLevel::AUDIT,
         "signal_decision",
         {{"signal_id", format_u64(signal.signal_id)},
+         {"origin_tick_id", format_u64(c.origin_tick_id)},
+         {"trace_spans_mono_ns", trace_spans},
          {"signal_timestamp_ns", format_u64(c.timestamp_ns)},
          {"strategy_id", c.strategy_id},
          {"model_version", c.model_version},

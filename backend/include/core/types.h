@@ -49,17 +49,23 @@ typedef enum {
 #endif
 /**
  * @brief Represents a single tick from the market.
- * Optimized size: 8 (ts) + 8 (px) + 8 (qty) + 16 (sym) + 8 (src) + 1 (side) + 7 (pad) = 56 bytes data + align.
+ * Layout: 8 (ts) + 8 (px) + 8 (qty) + 16 (sym) + 8 (src) + 1 (side) + 7 (pad) + 8 (ingress) = 64.
  * Fits within a single 64-byte cache line.
+ *
+ * ingress_ns occupies what used to be implicit alignment padding, at the END
+ * of the struct on purpose: legacy V1 payloads (raw memcpy of this struct)
+ * carried zeros in those bytes, so old payloads decode as ingress_ns == 0
+ * ("never stamped") and every pre-existing field keeps its offset.
  */
 typedef struct ARGENTUM_ALIGNAS_64 {
-    uint64_t timestamp_ns;  // Nanoseconds since epoch
+    uint64_t timestamp_ns;  // Source/exchange time: nanoseconds since epoch
     double price;
     double quantity;
     char symbol[SYMBOL_LEN];
     char source[SOURCE_LEN]; // e.g., "BINANCE", "BYMA"
     uint8_t side;           // 1=Buy, 2=Sell
-    uint8_t _padding[7];    // Align to 64 bytes (optional but good for cache)
+    uint8_t _padding[7];    // Keeps ingress_ns 8-byte aligned at offset 56
+    uint64_t ingress_ns;    // Wall-clock ns when THIS process first owned the tick; 0 = not stamped
 } MarketTick;
 #ifdef _MSC_VER
 #pragma warning(pop)
@@ -102,9 +108,15 @@ typedef struct {
 #ifdef __cplusplus
 static_assert(sizeof(MarketTick) == 64, "MarketTick must be exactly 64 bytes.");
 static_assert(alignof(MarketTick) == 64, "MarketTick must be 64-byte aligned.");
+static_assert(offsetof(MarketTick, side) == 48, "side must stay at offset 48 (V1 wire compat).");
+static_assert(offsetof(MarketTick, ingress_ns) == 56,
+              "ingress_ns must occupy the former padding at offset 56 (V1 wire compat).");
 #else
 _Static_assert(sizeof(MarketTick) == 64, "MarketTick must be exactly 64 bytes.");
 _Static_assert(_Alignof(MarketTick) == 64, "MarketTick must be 64-byte aligned.");
+_Static_assert(offsetof(MarketTick, side) == 48, "side must stay at offset 48 (V1 wire compat).");
+_Static_assert(offsetof(MarketTick, ingress_ns) == 56,
+               "ingress_ns must occupy the former padding at offset 56 (V1 wire compat).");
 #endif
 
 #ifdef __cplusplus

@@ -6,13 +6,16 @@ Make the low-latency core measurable, reproducible and safe to evolve.
 
 ## Estado Actual
 
-The event bus, codec, matching benchmark and pipeline benchmark exist. Latency goals are documented as targets but not yet enforced as acceptance gates.
+The event bus, codec, matching benchmark and pipeline benchmark exist.
+
+**Latency Block 1 (July 2026, ADR 0014/0015) delivered the measurement core of this phase:** one clock module with a CI-enforced discipline gate (`scripts/check_clock_discipline.py`), the shared `core::LatencyHistogram` replacing all sort-based percentile sites, benchmark harness v2 (warmup, JSON output, machine-captured environment metadata) across `matching`/`regime`/`pipeline` plus the previously missing `risk` benchmark, and a regression gate (`scripts/check_benchmarks.py` vs `docs/benchmarks/thresholds.json`). Baseline: [`docs/benchmarks/2026-07-decision-engine-baseline.md`](../../benchmarks/2026-07-decision-engine-baseline.md) (2026-07-08 section).
 
 ## Problemas Detectados
 
-- Benchmark output and environment metadata need standardization.
-- Logging, persistence and queue behavior must be measured under load.
-- p50/p95/p99/p99.9 are not uniformly reported across all paths.
+- ~~Benchmark output and environment metadata need standardization.~~ Done (harness v2, ADR 0015).
+- Logging, persistence and queue behavior must be measured under load (persistence writer benchmark still pending).
+- ~~p50/p95/p99/p99.9 are not uniformly reported across all paths.~~ Done (shared histogram, ADR 0015).
+- API order-ack benchmark still pending.
 
 ## Subfases
 

@@ -14,7 +14,6 @@
 #include "trading/order_manager.hpp"
 #include "risk/risk_manager.hpp"
 #include "engine/order_book.hpp"
-#include "benchmark/latency_tester.hpp"
 #include "gateway/exchange_gateway.hpp"
 #include "codec/market_tick_codec.hpp"
 #include "alerts/alert_system.hpp"
@@ -142,10 +141,10 @@ int main() {
     ARGENTUM_LOG(INFO, "[API] Snapshot BTC/USDT: " << gateway.latest_tick_json("BTC/USDT"));
     ARGENTUM_LOG(INFO, "[API] Health: " << gateway.health_json());
 
-    // 4. Latency Benchmark (Phase 16)
-    argentum::benchmark::LatencyTester tester;
-    tester.start(1000000); // 1 Million Ops
-    tester.report();
+    // The mock LatencyTester that used to run here measured a volatile
+    // multiply and nothing else; deleted per ADR 0015. Real latency numbers
+    // come from the argentum_*_benchmark binaries and the wire-to-decision
+    // report in the demos.
 
     ARGENTUM_LOG(INFO, "[Argentum-FX] Main Loop Entering Wait State...");
     // In real app: while(running) { poll(); }

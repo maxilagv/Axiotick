@@ -8,12 +8,14 @@ Make system behavior visible: latency, throughput, drops, risk decisions, orders
 
 Basic logging, audit messages and some API metrics exist. Full observability is not implemented.
 
+**Latency Block 1 (July 2026, ADR 0014) delivered the trace backbone of this phase:** `TraceSpans` with per-stage monotonic stamps through tick → signal → gate → risk → OMS → journal, `tick_id` minted at ingress and journaled with every order event (cancels/replaces included — that correlation bug is fixed and regression-tested), per-decision spans in the `signal_decision` audit event (all rejects + 1-in-N accepts), and the wire-to-decision percentile report in the demos and Mode B backtests.
+
 ## Problemas Detectados
 
 - Metrics are not consistent across modules.
 - No full SLO dashboard.
 - No incident runbooks or alert routing.
-- Tracing from signal to execution is incomplete.
+- ~~Tracing from signal to execution is incomplete.~~ In-process chain done (ADR 0014); venue-side ack tracing lands with paper trading.
 
 ## Subfases
 

@@ -2,6 +2,7 @@
 
 #include "audit/logger.hpp"
 #include "bus/spsc_ring_buffer.hpp"
+#include "core/latency_histogram.hpp"
 #include "core/time_utils.hpp"
 #include "system/cpu_utils.hpp"
 
@@ -21,8 +22,8 @@ namespace {
 constexpr size_t kMaxQueueCapacity = 65536;
 
 bool is_fx_market_open() {
-    const auto now = std::chrono::system_clock::now();
-    const std::time_t seconds = std::chrono::system_clock::to_time_t(now);
+    const std::time_t seconds =
+        static_cast<std::time_t>(argentum::core::wall_now_ns() / 1'000'000'000ULL);
     std::tm utc_tm{};
 #ifdef _WIN32
     gmtime_s(&utc_tm, &seconds);
@@ -79,7 +80,7 @@ public:
             return ARGENTUM_ERR_INVALID;
         }
 
-        const uint64_t start_ns = argentum::core::now_ns();
+        const uint64_t start_ns = argentum::core::mono_now_ns();
         TopicState* state = get_or_create_topic(topic);
         if (!state || !state->running.load(std::memory_order_acquire)) {
             return ARGENTUM_ERR_INVALID;
@@ -120,14 +121,14 @@ public:
                 return ARGENTUM_ERR_TIMEOUT;
             }
             case BackpressurePolicy::Block: {
-                const auto start = std::chrono::steady_clock::now();
-                const auto timeout = std::chrono::milliseconds(config_.block_timeout_ms);
+                const uint64_t timeout_ns =
+                    static_cast<uint64_t>(config_.block_timeout_ms) * 1'000'000ULL;
                 while (state->running.load(std::memory_order_acquire)) {
                     if (publish_now()) {
                         return ARGENTUM_OK;
                     }
                     if (config_.block_timeout_ms != 0 &&
-                        (std::chrono::steady_clock::now() - start) >= timeout) {
+                        (argentum::core::mono_now_ns() - start_ns) >= timeout_ns) {
                         update_publish_latency(state, start_ns);
                         return ARGENTUM_ERR_TIMEOUT;
                     }
@@ -183,6 +184,12 @@ public:
         out->published = published;
         out->publish_latency_ns_avg = (published == 0) ? 0 : (total_latency / published);
         out->publish_latency_ns_max = metrics.publish_latency_ns_max.load(std::memory_order_relaxed);
+#ifdef ARGENTUM_ENABLE_LATENCY_TRACE
+        out->publish_latency_ns_p50 = metrics.publish_hist.percentile(0.50);
+        out->publish_latency_ns_p95 = metrics.publish_hist.percentile(0.95);
+        out->publish_latency_ns_p99 = metrics.publish_hist.percentile(0.99);
+        out->publish_latency_ns_p999 = metrics.publish_hist.percentile(0.999);
+#endif
         return true;
     }
 
@@ -194,6 +201,10 @@ private:
         std::atomic<uint64_t> published{0};
         std::atomic<uint64_t> publish_latency_ns_total{0};
         std::atomic<uint64_t> publish_latency_ns_max{0};
+#ifdef ARGENTUM_ENABLE_LATENCY_TRACE
+        // Concurrent variant: publish() may run on several producer threads.
+        argentum::core::ConcurrentLatencyHistogram publish_hist{};
+#endif
     };
 
     struct TopicState {
@@ -288,8 +299,18 @@ private:
         if (!state) {
             return;
         }
-        const uint64_t elapsed = argentum::core::now_ns() - start_ns;
+        const uint64_t elapsed = argentum::core::mono_now_ns() - start_ns;
         state->metrics.publish_latency_ns_total.fetch_add(elapsed, std::memory_order_relaxed);
+#ifdef ARGENTUM_ENABLE_LATENCY_TRACE
+        // Sampled 1-in-16 by timestamp low bits: histogram record costs ~5
+        // relaxed RMWs, which measurably taxed multi-M/s publish rates when
+        // recorded per call (Block 1 overhead gate). ns-resolution low bits
+        // are effectively uniform, and >=1M publishes still yield >60k
+        // samples — percentile estimates, exact counters stay unsampled.
+        if ((start_ns & 0xF) == 0) {
+            state->metrics.publish_hist.record(elapsed);
+        }
+#endif
         uint64_t prev = state->metrics.publish_latency_ns_max.load(std::memory_order_relaxed);
         while (elapsed > prev &&
                !state->metrics.publish_latency_ns_max.compare_exchange_weak(

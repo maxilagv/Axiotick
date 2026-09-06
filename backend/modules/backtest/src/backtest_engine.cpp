@@ -234,6 +234,8 @@ StrategyBacktestReport BacktestEngine::run_strategy(
     regime::RegimeLabel last_notified_label = regime::RegimeLabel::Unknown;
 
     uint64_t maker_id = config.maker_base_order_id;
+    core::PipelineTelemetry telemetry;
+    core::TraceSpans spans;
 
     ARGENTUM_LOG(
         INFO,
@@ -243,12 +245,18 @@ StrategyBacktestReport BacktestEngine::run_strategy(
 
     for (const MarketTick& tick : history_) {
         ++report.ticks_processed;
+        spans.reset();
+        spans.tick_id = core::next_tick_id();
+        spans.ingress_wall_ns = (tick.ingress_ns != 0) ? tick.ingress_ns : core::wall_now_ns();
+        spans.stamp(core::TraceStage::TickIngress);
+
         risk->maybe_roll_day(tick.timestamp_ns);
         risk->mark_to_market(symbol, tick.price);
         engine.on_market_tick(symbol, tick.price, tick.timestamp_ns);
 
         if (auto closed = bars.on_tick(tick)) {
             classifier.on_bar(*closed);
+            spans.stamp(core::TraceStage::BarClose);
             ++report.bars_closed;
             const auto label = classifier.current_label();
             const size_t label_index = static_cast<size_t>(label);
@@ -288,12 +296,14 @@ StrategyBacktestReport BacktestEngine::run_strategy(
         maker.tif = TIF_GTC;
         (void)book->add_order(maker);
 
-        (void)engine.process(*candidate);
+        (void)engine.process(*candidate, &spans);
+        telemetry.absorb(spans);
 
         (void)book->cancel_order(maker.order_id);
     }
 
     report.funnel = engine.stats();
+    report.pipeline_latency = telemetry.report();
 
     // Resolve every evaluation whose horizon falls beyond the last tick —
     // dropping them silently would understate the sample.

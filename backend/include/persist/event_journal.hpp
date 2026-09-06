@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/latency_histogram.hpp"
 #include "core/types.h"
 #include "persist/journal_ring_buffer.hpp"
 
@@ -59,6 +60,7 @@ struct JournalEvent {
     uint8_t tif = 0;
     bool resting = false;
     uint64_t related_signal_id = 0;  // correlates the order with the signal_decision audit event
+    uint64_t tick_id = 0;            // trace id of the originating market tick (0 = unknown/legacy)
     uint64_t enqueued_at_ns = 0;
 };
 
@@ -70,6 +72,7 @@ struct JournalLatencySnapshot {
     uint64_t p50_ns = 0;
     uint64_t p95_ns = 0;
     uint64_t p99_ns = 0;
+    uint64_t p999_ns = 0;
     uint64_t max_ns = 0;
 };
 
@@ -118,7 +121,7 @@ private:
     mutable std::mutex flush_mutex_;
     std::condition_variable flush_cv_;
     mutable std::mutex latency_mutex_;
-    std::vector<uint64_t> latency_samples_;
+    core::LatencyHistogram latency_hist_;
 
 #ifdef _WIN32
     HANDLE wake_event_ = nullptr;

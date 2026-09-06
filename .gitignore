@@ -16,6 +16,9 @@
 !/data/sample_ticks.jsonl
 !/data/market_ticks.csv
 
+# Benchmark JSON output (harness v2); baselines live in docs/benchmarks/
+/benchmarks_out/
+
 # CMake
 cmake-build-*/
 

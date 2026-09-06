@@ -1,5 +1,10 @@
 # Define source groups
-set(CORE_SOURCES modules/core/src/dummy.c modules/core/src/time_utils.cpp)
+set(CORE_SOURCES
+    modules/core/src/dummy.c
+    modules/core/src/time_utils.cpp
+    modules/core/src/trace_context.cpp
+    modules/core/src/pipeline_telemetry.cpp
+)
 set(NETWORK_SOURCES modules/network/src/socket_manager.c)
 set(DATAFEED_SOURCES modules/datafeed/src/market_parser.c modules/datafeed/src/normalizer.c modules/datafeed/src/feed_player.cpp)
 set(BUS_SOURCES modules/bus/src/message_bus.cpp modules/bus/src/message_protocol.cpp)
@@ -50,6 +55,11 @@ endif()
 # Libraries
 add_library(argentum_core STATIC ${CORE_SOURCES})
 target_include_directories(argentum_core PUBLIC include)
+if(ARGENTUM_ENABLE_LATENCY_TRACE)
+    # PUBLIC on the root library: every target links argentum_core, so the
+    # flag propagates to all TraceSpans::stamp() call sites consistently.
+    target_compile_definitions(argentum_core PUBLIC ARGENTUM_ENABLE_LATENCY_TRACE)
+endif()
 
 add_library(argentum_bus STATIC ${BUS_SOURCES})
 target_include_directories(argentum_bus PUBLIC include)
@@ -135,6 +145,16 @@ if(WIN32)
     target_link_libraries(argentum_node PRIVATE ws2_32)
 endif()
 
+# Benchmarks: all run through benchmark::Harness (warmup, unified clock,
+# JSON output with machine-captured environment metadata; ADR 0015).
+# ARGENTUM_BUILD_CONFIG feeds the metadata for multi-config generators.
+set(ARGENTUM_BENCHMARK_TARGETS
+    argentum_pipeline_benchmark
+    argentum_matching_benchmark
+    argentum_regime_benchmark
+    argentum_risk_benchmark
+)
+
 add_executable(argentum_pipeline_benchmark benchmarks/pipeline_benchmark.cpp)
 target_link_libraries(argentum_pipeline_benchmark PRIVATE
     argentum_bus
@@ -154,6 +174,19 @@ target_link_libraries(argentum_regime_benchmark PRIVATE
     argentum_regime
     argentum_core
 )
+
+add_executable(argentum_risk_benchmark benchmarks/risk_benchmark.cpp)
+target_link_libraries(argentum_risk_benchmark PRIVATE
+    argentum_risk
+    argentum_core
+)
+
+foreach(bench_target IN LISTS ARGENTUM_BENCHMARK_TARGETS)
+    target_compile_definitions(${bench_target} PRIVATE ARGENTUM_BUILD_CONFIG="$<CONFIG>")
+endforeach()
+
+add_executable(argentum_clock_check apps/clock_check/clock_check_main.cpp)
+target_link_libraries(argentum_clock_check PRIVATE argentum_core)
 
 add_executable(argentum_replay apps/replay/replay_main.cpp)
 target_link_libraries(argentum_replay PRIVATE

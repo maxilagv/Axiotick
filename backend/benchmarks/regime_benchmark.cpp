@@ -1,18 +1,16 @@
-// Latency benchmark for RegimeClassifier::on_bar(), following the same
-// methodology as matching_benchmark: per-call nanosecond timing over 1M
-// deterministic synthetic bars, reported as p50/p95/p99/p99.9.
-//
-// Record alongside results (per docs/LATENCY_AND_SCALE_TARGETS.md): CPU,
-// memory, OS, power profile, compiler, build type and these constants.
+// RegimeClassifier::on_bar() latency over 1M deterministic synthetic bars
+// (alternating calm/volatile phases so every classifier branch runs), through
+// the shared benchmark harness. JSON path: argv[1], default
+// benchmarks_out/regime.json.
 
+#include "benchmark/harness.hpp"
 #include "regime/bar_aggregator.hpp"
 #include "regime/regime_classifier.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <iostream>
+#include <cstdio>
 #include <vector>
 
 namespace {
@@ -36,14 +34,6 @@ public:
 private:
     uint64_t state_;
 };
-
-size_t percentile_index(size_t size, double q) {
-    size_t index = static_cast<size_t>(static_cast<double>(size) * q);
-    if (index >= size) {
-        index = size - 1;
-    }
-    return index;
-}
 
 std::vector<argentum::regime::Bar> synthesize_bars(size_t count) {
     std::vector<argentum::regime::Bar> bars;
@@ -82,38 +72,32 @@ std::vector<argentum::regime::Bar> synthesize_bars(size_t count) {
 
 } // namespace
 
-int main() {
-    constexpr size_t kIterations = 1'000'000;
+int main(int argc, char** argv) {
+    constexpr uint64_t kWarmup = 10'000;
+    constexpr uint64_t kIterations = 1'000'000;
 
-    const std::vector<argentum::regime::Bar> bars = synthesize_bars(kIterations);
+    const std::vector<argentum::regime::Bar> bars = synthesize_bars(kWarmup + kIterations);
     argentum::regime::RegimeClassifier classifier(argentum::regime::RegimeClassifierConfig{});
 
-    std::vector<uint64_t> latencies_ns;
-    latencies_ns.reserve(kIterations);
+    const argentum::core::LatencyReport report = argentum::benchmark::measure_loop(
+        kWarmup, kIterations, [&](uint64_t i) { classifier.on_bar(bars[i]); });
 
-    for (const auto& bar : bars) {
-        const auto start = std::chrono::high_resolution_clock::now();
-        classifier.on_bar(bar);
-        const auto end = std::chrono::high_resolution_clock::now();
-        latencies_ns.push_back(static_cast<uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count()));
+    argentum::benchmark::BenchmarkReporter reporter("regime_benchmark");
+    argentum::benchmark::BenchmarkCase result;
+    result.name = "regime_classifier_on_bar";
+    result.warmup_iterations = kWarmup;
+    result.iterations = kIterations;
+    result.latency = report;
+    result.extra.emplace_back("config", "defaults (vol_window=20, percentile_window=100, dmi_period=14)");
+    result.extra.emplace_back("final_label", argentum::regime::to_string(classifier.current_label()));
+    reporter.add(result);
+
+    reporter.print_human(stdout);
+    const char* json_path = (argc > 1) ? argv[1] : "benchmarks_out/regime.json";
+    if (!reporter.write_json(json_path)) {
+        std::fprintf(stderr, "[regime_benchmark] failed to write %s\n", json_path);
+        return 1;
     }
-
-    std::sort(latencies_ns.begin(), latencies_ns.end());
-    const double p50 = static_cast<double>(latencies_ns[percentile_index(latencies_ns.size(), 0.50)]);
-    const double p95 = static_cast<double>(latencies_ns[percentile_index(latencies_ns.size(), 0.95)]);
-    const double p99 = static_cast<double>(latencies_ns[percentile_index(latencies_ns.size(), 0.99)]);
-    const double p999 = static_cast<double>(latencies_ns[percentile_index(latencies_ns.size(), 0.999)]);
-
-    std::cout << "[Regime Benchmark] Iterations: " << kIterations << "\n";
-    std::cout << "[Regime Benchmark] Config: defaults (vol_window=20, percentile_window=100, dmi_period=14)\n";
-    std::cout << "[Regime Benchmark] Final label: "
-              << argentum::regime::to_string(classifier.current_label())
-              << " confidence=" << classifier.current_confidence() << "\n";
-    std::cout << "[Regime Benchmark] P50: " << p50 << " ns\n";
-    std::cout << "[Regime Benchmark] P95: " << p95 << " ns\n";
-    std::cout << "[Regime Benchmark] P99: " << p99 << " ns\n";
-    std::cout << "[Regime Benchmark] P99.9: " << p999 << " ns\n";
-
+    std::printf("[regime_benchmark] json: %s\n", json_path);
     return 0;
 }

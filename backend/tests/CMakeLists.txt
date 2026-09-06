@@ -1,4 +1,22 @@
 
+add_executable(latency_histogram_test latency_histogram_test.cpp)
+target_link_libraries(latency_histogram_test PRIVATE argentum_core)
+add_test(NAME latency_histogram_test COMMAND latency_histogram_test)
+
+add_executable(time_trace_test time_trace_test.cpp)
+target_link_libraries(time_trace_test PRIVATE argentum_core)
+add_test(NAME time_trace_test COMMAND time_trace_test)
+
+add_executable(trace_correlation_journal_test trace_correlation_journal_test.cpp)
+target_link_libraries(trace_correlation_journal_test PRIVATE
+  argentum_trading
+  argentum_risk
+  argentum_engine
+  argentum_persist
+  argentum_core
+)
+add_test(NAME trace_correlation_journal_test COMMAND trace_correlation_journal_test)
+
 add_executable(message_codec_test message_codec_test.cpp)
 target_link_libraries(message_codec_test PRIVATE argentum_codec argentum_bus argentum_core)
 

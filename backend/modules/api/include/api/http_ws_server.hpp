@@ -92,7 +92,7 @@ private:
     std::atomic<bool> running_{false};
 
     struct IpRateState {
-        std::chrono::steady_clock::time_point window_start{};
+        uint64_t window_start_mono_ns = 0;  // core::mono_now_ns() domain
         uint32_t requests = 0;
     };
 

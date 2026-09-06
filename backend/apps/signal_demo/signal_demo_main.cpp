@@ -9,7 +9,9 @@
 #include "analysis/sma_crossover_strategy.hpp"
 #include "audit/logger.hpp"
 #include "core/fixed_point.hpp"
+#include "core/pipeline_telemetry.hpp"
 #include "core/time_utils.hpp"
+#include "core/trace_context.hpp"
 #include "core/types.h"
 #include "engine/order_book.hpp"
 #include "ev/ev_gate.hpp"
@@ -89,6 +91,8 @@ std::vector<MarketTick> synthesize_ticks(size_t count) {
         std::strncpy(tick.symbol, kSymbol, sizeof(tick.symbol) - 1);
         std::strncpy(tick.source, "SYNTH", sizeof(tick.source) - 1);
         tick.side = static_cast<uint8_t>((rng.next_unit() < 0.5) ? SIDE_BUY : SIDE_SELL);
+        // Synthetic source doubles as ingress: this process mints the tick.
+        tick.ingress_ns = argentum::core::wall_now_ns();
         ticks.push_back(tick);
     }
 
@@ -126,8 +130,15 @@ int main() {
 
     uint64_t maker_id = 900'000'000ULL;
     size_t fills = 0;
+    core::PipelineTelemetry telemetry;
+    core::TraceSpans spans;
 
     for (const MarketTick& tick : ticks) {
+        spans.reset();
+        spans.tick_id = core::next_tick_id();
+        spans.ingress_wall_ns = tick.ingress_ns;
+        spans.stamp(core::TraceStage::TickIngress);
+
         risk->maybe_roll_day(tick.timestamp_ns);
         risk->mark_to_market(kSymbol, tick.price);
 
@@ -150,7 +161,8 @@ int main() {
         maker.tif = TIF_GTC;
         (void)book->add_order(maker);
 
-        const signal::Signal signal = engine.process(*candidate);
+        const signal::Signal signal = engine.process(*candidate, &spans);
+        telemetry.absorb(spans);
         if (signal.order_accepted) {
             ++fills;
         }
@@ -184,12 +196,20 @@ int main() {
     std::printf("kill_switch        : %s\n", risk->kill_switch_active() ? "ACTIVE" : "inactive");
 
     std::printf("\n--- EV gate latency (per evaluate call) ---\n");
-    std::printf("samples=%llu p50=%lluns p95=%lluns p99=%lluns max=%lluns\n",
+    std::printf("samples=%llu p50=%lluns p95=%lluns p99=%lluns p99.9=%lluns max=%lluns\n",
                 static_cast<unsigned long long>(gate_latency.samples),
                 static_cast<unsigned long long>(gate_latency.p50_ns),
                 static_cast<unsigned long long>(gate_latency.p95_ns),
                 static_cast<unsigned long long>(gate_latency.p99_ns),
+                static_cast<unsigned long long>(gate_latency.p999_ns),
                 static_cast<unsigned long long>(gate_latency.max_ns));
+
+    std::printf("\n");
+    telemetry.print(stdout);
+    const char* kLatencyJsonPath = "data/signal_demo_latency.json";
+    if (telemetry.write_json(kLatencyJsonPath, "signal_demo")) {
+        std::printf("latency json: %s\n", kLatencyJsonPath);
+    }
 
     // Operator drill: trigger the kill switch manually, show that the OMS path
     // rejects while it is active, then reset it.

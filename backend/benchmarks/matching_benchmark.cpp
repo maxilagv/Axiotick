@@ -1,15 +1,17 @@
+// OrderBook::match_order latency, through the shared benchmark harness
+// (warmup, unified clock, histogram percentiles, JSON output with
+// machine-captured environment metadata). JSON path: argv[1], default
+// benchmarks_out/matching.json.
+
+#include "benchmark/harness.hpp"
 #include "core/fixed_point.hpp"
 #include "core/time_utils.hpp"
 #include "engine/order_book.hpp"
 
-#include <algorithm>
 #include <cassert>
-#include <chrono>
 #include <cstdint>
 #include <cstring>
-#include <iostream>
 #include <memory>
-#include <vector>
 
 namespace {
 
@@ -27,18 +29,11 @@ Order make_limit_order(uint64_t order_id, Side side, double price, double quanti
     return order;
 }
 
-size_t percentile_index(size_t size, double q) {
-    size_t index = static_cast<size_t>(static_cast<double>(size) * q);
-    if (index >= size) {
-        index = size - 1;
-    }
-    return index;
-}
-
 } // namespace
 
-int main() {
-    constexpr size_t kIterations = 1000000;
+int main(int argc, char** argv) {
+    constexpr uint64_t kWarmup = 10'000;
+    constexpr uint64_t kIterations = 1'000'000;
     constexpr size_t kWarmBookDepth = 1024;
     constexpr double kPrice = 100.0;
     constexpr double kQuantity = 1.0;
@@ -47,42 +42,45 @@ int main() {
     for (size_t i = 0; i < kWarmBookDepth; ++i) {
         const auto maker = make_limit_order(1000 + static_cast<uint64_t>(i), SIDE_SELL, kPrice, kQuantity, i + 1);
         assert(book->add_order(maker));
+        (void)maker;
     }
-
-    std::vector<uint64_t> latencies_ns;
-    latencies_ns.reserve(kIterations);
 
     uint64_t next_maker_id = 1000 + static_cast<uint64_t>(kWarmBookDepth);
-    uint64_t next_taker_id = 100000000;
+    uint64_t next_taker_id = 100'000'000;
 
-    for (size_t i = 0; i < kIterations; ++i) {
-        Order taker = make_limit_order(next_taker_id++, SIDE_BUY, kPrice, kQuantity, argentum::core::now_ns());
+    const argentum::core::LatencyReport report = argentum::benchmark::measure_loop(
+        kWarmup, kIterations, [&](uint64_t) {
+            const Order taker = make_limit_order(
+                next_taker_id++, SIDE_BUY, kPrice, kQuantity, argentum::core::mono_now_ns());
+            const auto trades = book->match_order(taker, false);
+            assert(trades.size() == 1);
+            assert(trades[0].quantity_lots == taker.quantity_lots);
+            (void)trades;
 
-        const auto start = std::chrono::high_resolution_clock::now();
-        const auto trades = book->match_order(taker, false);
-        const auto end = std::chrono::high_resolution_clock::now();
-        const uint64_t elapsed = static_cast<uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count());
-        latencies_ns.push_back(elapsed);
+            // Refill so the book depth stays constant across iterations.
+            const auto maker = make_limit_order(
+                next_maker_id++, SIDE_SELL, kPrice, kQuantity, argentum::core::mono_now_ns());
+            assert(book->add_order(maker));
+            (void)maker;
+        });
 
-        assert(trades.size() == 1);
-        assert(trades[0].quantity_lots == taker.quantity_lots);
+    argentum::benchmark::BenchmarkReporter reporter("matching_benchmark");
+    argentum::benchmark::BenchmarkCase result;
+    result.name = "order_book_match_and_refill";
+    result.warmup_iterations = kWarmup;
+    result.iterations = kIterations;
+    result.latency = report;
+    result.extra.emplace_back("warm_book_depth", "1024");
+    result.extra.emplace_back(
+        "note", "each iteration = one full match + one refill add_order (book depth constant)");
+    reporter.add(result);
 
-        const auto maker = make_limit_order(next_maker_id++, SIDE_SELL, kPrice, kQuantity, argentum::core::now_ns());
-        assert(book->add_order(maker));
+    reporter.print_human(stdout);
+    const char* json_path = (argc > 1) ? argv[1] : "benchmarks_out/matching.json";
+    if (!reporter.write_json(json_path)) {
+        std::fprintf(stderr, "[matching_benchmark] failed to write %s\n", json_path);
+        return 1;
     }
-
-    std::sort(latencies_ns.begin(), latencies_ns.end());
-    const double p50_ns = static_cast<double>(latencies_ns[percentile_index(latencies_ns.size(), 0.50)]);
-    const double p95_ns = static_cast<double>(latencies_ns[percentile_index(latencies_ns.size(), 0.95)]);
-    const double p99_ns = static_cast<double>(latencies_ns[percentile_index(latencies_ns.size(), 0.99)]);
-    const double p999_ns = static_cast<double>(latencies_ns[percentile_index(latencies_ns.size(), 0.999)]);
-
-    std::cout << "[Matching Benchmark] Iterations: " << kIterations << "\n";
-    std::cout << "[Matching Benchmark] P50: " << p50_ns << " ns\n";
-    std::cout << "[Matching Benchmark] P95: " << p95_ns << " ns\n";
-    std::cout << "[Matching Benchmark] P99: " << p99_ns << " ns\n";
-    std::cout << "[Matching Benchmark] P99.9: " << p999_ns << " ns\n";
-
+    std::printf("[matching_benchmark] json: %s\n", json_path);
     return 0;
 }
